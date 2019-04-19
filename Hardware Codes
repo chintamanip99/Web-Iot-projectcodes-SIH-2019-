@@ -1,0 +1,164 @@
+Data sensing and sending to base station :
+#include <RF24.h>
+#include <RF24Network.h>
+#include <SPI.h>
+RF24 radio(9, 10);               // nRF24L01 (CE,CSN)
+RF24Network network(radio);      // Include the radio in the network
+const uint16_t node1 = 01;   // Address of this node in Octal format ( 04,031, etc)
+const uint16_t master = 00;    
+
+const int voltage_sensor = A1;
+const int current_sensor = A0;
+
+float mVperAmp = 34.0; // use 100 for 20A Module and 66 for 30A Module
+double mVperVOLT = 1.9; 
+double Voltage_pp_CS = 0;
+double VRMS_CS = 0;
+double AmpsRMS = 0;
+double Voltage_pp_VS = 0;
+double VRMS_VS = 0;
+double VoltRMS = 0;
+double power = 0;
+char var[50]; 
+
+
+void setup(){ 
+ Serial.begin(9600);
+ SPI.begin();
+  radio.begin();
+  network.begin(90, node1);  //(channel, node address)
+}
+ 
+void loop(){
+  network.update();
+ 
+ Voltage_pp_CS = getVPP_CS();
+ VRMS_CS = (Voltage_pp_CS/2.0) *0.707;  //root 2 is 0.707
+ AmpsRMS = (VRMS_CS * 1000)/mVperAmp;
+if(AmpsRMS<0.11)
+ {AmpsRMS=0;}
+  
+ Voltage_pp_VS = getVPP_VS();
+ VRMS_VS = (Voltage_pp_VS/2.0) *0.707;  //root 2 is 0.707
+ VoltRMS = (VRMS_VS * 1000)/mVperVOLT;
+ if(VoltRMS<50)
+ {VoltRMS=0;}
+ power = AmpsRMS*VoltRMS;
+ String dbuff2="t";
+  dbuff2+="machine1";dbuff2+="u";
+ dbuff2+=(String)power;dbuff2+="v";dbuff2+=(String)VoltRMS;dbuff2+="w";dbuff2+=(String)AmpsRMS;
+dbuff2+="x";
+ dbuff2.toCharArray(var, 50);
+        RF24NetworkHeader header(master);     // (Address where the data is going)
+  bool ok = network.write(header, &var, sizeof(var)); // Send the data
+  delay(1000);
+ Serial.println( VoltRMS);
+ Serial.println(AmpsRMS);
+ Serial.print(power);
+ Serial.println(" Watt");
+}
+ 
+float getVPP_CS()
+{
+  float result;
+  int readValue;             //value read from the sensor
+  int maxValue = 0;          // store max value here
+  int minValue = 1024;          // store min value here
+  
+   uint32_t start_time = millis();
+   while((millis()-start_time) < 2000) //sample for 1 Sec
+   {
+       readValue = analogRead(current_sensor);
+       // see if you have a new maxValue
+       if (readValue > maxValue) 
+       {
+           /*record the maximum sensor value*/
+           maxValue = readValue;
+       }
+       if (readValue < minValue) 
+       {
+           /*record the minimum sensor value*/
+           minValue = readValue;
+       }
+   }
+   
+   // Subtract min from max
+   result = ((maxValue - minValue) * 5.0)/1024.0;
+      
+   return result;
+ }
+
+ float getVPP_VS()
+{
+  float result;
+  int readValue;             //value read from the sensor
+  int maxValue = 0;          // store max value here
+  int minValue = 1024;          // store min value here
+  
+   uint32_t start_time = millis();
+   while((millis()-start_time) < 2000) //sample for 1 Sec
+   {
+       readValue = analogRead(voltage_sensor);
+       // see if you have a new maxValue
+       if (readValue > maxValue) 
+       {
+           /*record the maximum sensor value*/
+           maxValue = readValue;
+       }
+       if (readValue < minValue) 
+       {
+           /*record the minimum sensor value*/
+           minValue = readValue;
+       }
+   }
+   
+   // Subtract min from max
+   result = ((maxValue - minValue) * 5.0)/1024.0;
+      
+   return result;
+ }
+ ===============================================================================================================================
+ Receiving Data from individual nodes:(Arduino code):
+ #include <RF24.h>
+#include <RF24Network.h>
+#include <SPI.h>
+RF24 radio(9, 10);               // nRF24L01 (CE,CSN)
+RF24Network network(radio);      // Include the radio in the network
+const uint16_t master = 00;   // Address of our node in Octal format ( 04,031, etc)
+
+void setup() {
+  Serial.begin(9600);
+  SPI.begin();
+  radio.begin();
+  network.begin(90, master); //(channel, node address)
+ 
+}
+void loop() {
+  network.update();
+  while ( network.available() ) {     // Is there any incoming data?
+    RF24NetworkHeader header;
+   char incomingData [50];
+    network.read(header, &incomingData, sizeof(incomingData)); // Read the incoming data
+    //myservo.write(incomingData);  // tell servo to go to a particular angle
+    Serial.println(incomingData);
+  }
+  
+}
+=======================================================================================================
+Sending Data to server (Pyhthon Code):
+#import sys
+#import serial
+from urllib.request import urlopen
+#html=urlopen("http://iotbasedproj.dx.am/proj2.php?mid="+"machine1"+"&power="+"1000"+"&voltage="+"0.5"+"&current="+"13")
+#sys.path.append("/usr/lib/python2.7/lib-dynload")
+import serial
+ser = serial.Serial('/dev/ttyUSB0',9600)
+line=""
+while 1:
+    line = str(ser.readline())
+    mid=line[line.index('t')+1:line.index('u')]
+    p=line[line.index('u')+1:line.index('v')]
+    v=line[line.index('v')+1:line.index('w')]
+    i=line[line.index('w')+1:line.index('x')]
+    html=urlopen("http://iotbasedproj.dx.am/proj2.php?mid="+mid+"&power="+p+"&voltage="+v+"&current="+i)
+    print(mid+" "+p+" "+v+" "+i)
